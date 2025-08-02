@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { Calendar, Clock, Building, User, ArrowRight, Upload, FileText, CheckCircle, Award, Star, Sparkles, Mic, Video, MessageSquare, Brain, Target, Users, Settings } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Calendar, Clock, Building, User, ArrowRight, Upload, FileText, CheckCircle, Award, Star, Sparkles, Mic, Video, MessageSquare, Brain, Target, Users, Settings, Play, Pause, RotateCcw, Square, RefreshCw, Send, Volume2, VolumeX, Sun, Moon } from 'lucide-react';
 import './App.css';
 import AdminDashboard from './AdminDashboard';
 import AdminLogin from './AdminLogin';
+import AIInterviewInterface from './AIInterviewInterface';
 
 function App() {
   const [currentStep, setCurrentStep] = useState('invitation'); // 'invitation', 'form', 'processing', 'complete', 'interview', 'admin', 'admin-login'
@@ -406,7 +407,7 @@ function App() {
           </p>
           
           <div className="summary-box">
-            <h3 className="summary-title">✅ Registration Summary:</h3>
+            <h3 className="summary-title">Registration Summary</h3>
             <div className="summary-grid">
               <div className="summary-item">
                 <p className="summary-label">Full Name</p>
@@ -422,22 +423,17 @@ function App() {
               </div>
               <div className="summary-item">
                 <p className="summary-label">Resume Status</p>
-                <p className="summary-value success">✅ Processed & Stored</p>
+                <p className="summary-value success">Processed & Stored</p>
               </div>
             </div>
           </div>
           
           <button onClick={handleStartActualInterview} className="interview-button">
-            <Award className="button-icon" />
-            Start Interview Now
-            <Sparkles className="button-icon animate-pulse" />
+
+          Start Interview Now
+          <Sparkles className="button-icon animate-pulse" />
           </button>
           
-          <div className="complete-footer">
-            <p className="complete-footer-text">
-              🎯 You're all set! The interview will begin when you click the button above.
-            </p>
-          </div>
         </div>
       </div>
     );
@@ -451,6 +447,15 @@ function App() {
   // Admin Dashboard Step
   if (currentStep === 'admin') {
     return <AdminDashboard onBack={handleAdminLogout} />;
+  }
+
+  // Interview Step
+  if (currentStep === 'interview') {
+    return (
+      <AIInterviewInterface 
+        onComplete={() => setCurrentStep('complete')} 
+      />
+    );
   }
 
   return null;

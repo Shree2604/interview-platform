@@ -81,7 +81,16 @@ body {
 /* Responsive grid adjustments */
 .details-grid, .instructions-grid, .summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+
+/* Responsive grid adjustments for mobile */
+.details-grid, .instructions-grid, .summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1rem;
   width: 100%;
 }
@@ -1346,4 +1355,16 @@ input[type="email"]:hover,
   .complete-container {
     padding: 0.25rem;
   }
+}
+
+/* Interview Container - Minimal overrides for App.css */
+.interview-container {
+  height: 100vh;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }

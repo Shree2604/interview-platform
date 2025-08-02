@@ -89,10 +89,6 @@ function AdminLogin({ onLogin }) {
         ) : (
           <form onSubmit={handleSubmit} className="login-form">
             <div className="form-group">
-              <label htmlFor="username" className="form-label">
-                <User size={16} />
-                Username
-              </label>
               <input
                 type="text"
                 id="username"
@@ -107,10 +103,6 @@ function AdminLogin({ onLogin }) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="password" className="form-label">
-                <Lock size={16} />
-                Password
-              </label>
               <div className="password-input-container">
                 <input
                   type={showPassword ? 'text' : 'password'}

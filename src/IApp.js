@@ -1,0 +1,625 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Play, Pause, RotateCcw, Mic, Square, RefreshCw, Send, ArrowRight, Volume2, VolumeX, Sun, Moon } from 'lucide-react';
+import './AIInterviewInterface.css';
+
+const AIInterviewInterface = () => {
+  const [isFlipped, setIsFlipped] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [userTranscript, setUserTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [currentQuestion, setCurrentQuestion] = useState(1);
+  const [isReadingTranscript, setIsReadingTranscript] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [recordingError, setRecordingError] = useState('');
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [debugInfo, setDebugInfo] = useState('');
+  
+  // Speech Recognition refs
+  const recognitionRef = useRef(null);
+  const recordingTimerRef = useRef(null);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
+  
+  // Questions data
+  const questions = [
+    {
+      id: 1,
+      audio: "Tell me about yourself and your background.",
+      text: "Tell me about yourself and your background."
+    },
+    {
+      id: 2,
+      audio: "What are your greatest strengths?",
+      text: "What are your greatest strengths?"
+    },
+    {
+      id: 3,
+      audio: "Where do you see yourself in 5 years?",
+      text: "Where do you see yourself in 5 years?"
+    }
+  ];
+
+  // Network status monitoring
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Initialize Speech Recognition with robust error handling
+  useEffect(() => {
+    const initializeSpeechRecognition = () => {
+      try {
+        setDebugInfo('Initializing speech recognition...');
+        
+        // Check browser support
+        if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
+          setRecordingError('Speech recognition not supported in this browser. Please use Chrome, Edge, or Safari.');
+          setDebugInfo('Speech recognition not supported');
+          return;
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognitionRef.current = new SpeechRecognition();
+        
+        // Configure recognition settings
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
+        recognitionRef.current.lang = 'en-US';
+        recognitionRef.current.maxAlternatives = 1;
+        
+        setDebugInfo('Speech recognition configured');
+        
+        // Event handlers
+        recognitionRef.current.onstart = () => {
+          console.log('Speech recognition started successfully');
+          setDebugInfo('Recognition started');
+          setIsRecording(true);
+          setRecordingError('');
+          retryCountRef.current = 0;
+          startRecordingTimer();
+        };
+        
+        recognitionRef.current.onresult = (event) => {
+          console.log('Speech recognition result received:', event);
+          setDebugInfo('Result received');
+          
+          let interimTranscript = '';
+          let finalTranscript = '';
+          
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+          
+          // Update interim transcript for live feedback
+          setInterimTranscript(interimTranscript);
+          
+          // Append final transcript to main transcript
+          if (finalTranscript) {
+            setUserTranscript(prev => {
+              const newTranscript = prev + (prev ? ' ' : '') + finalTranscript;
+              console.log('Final transcript added:', finalTranscript);
+              setDebugInfo(`Transcript: ${newTranscript}`);
+              return newTranscript;
+            });
+          }
+        };
+        
+        recognitionRef.current.onerror = (event) => {
+          console.error('Speech recognition error:', event.error);
+          setDebugInfo(`Error: ${event.error}`);
+          handleRecognitionError(event.error);
+        };
+        
+        recognitionRef.current.onend = () => {
+          console.log('Speech recognition ended');
+          setDebugInfo('Recognition ended');
+          stopRecordingTimer();
+          setIsRecording(false);
+          setIsProcessingAudio(false);
+          
+          // Auto-restart if recording was intended to continue
+          if (isRecording && retryCountRef.current < maxRetries) {
+            console.log('Auto-restarting recognition...');
+            setDebugInfo('Auto-restarting...');
+            setTimeout(() => {
+              startRecording();
+            }, 1000);
+          }
+        };
+        
+        console.log('Speech recognition initialized successfully');
+        setDebugInfo('Speech recognition ready');
+        
+      } catch (error) {
+        console.error('Failed to initialize speech recognition:', error);
+        setRecordingError('Failed to initialize speech recognition. Please refresh the page and try again.');
+        setDebugInfo(`Init error: ${error.message}`);
+      }
+    };
+
+    initializeSpeechRecognition();
+  }, []);
+
+  // Handle different types of recognition errors
+  const handleRecognitionError = (errorType) => {
+    let errorMessage = '';
+    
+    switch (errorType) {
+      case 'network':
+        errorMessage = 'Network error. Please check your internet connection and try again.';
+        break;
+      case 'not-allowed':
+        errorMessage = 'Microphone access denied. Please allow microphone permissions and try again.';
+        break;
+      case 'no-speech':
+        errorMessage = 'No speech detected. Please speak more clearly.';
+        break;
+      case 'audio-capture':
+        errorMessage = 'Audio capture error. Please check your microphone and try again.';
+        break;
+      case 'service-not-allowed':
+        errorMessage = 'Speech recognition service not allowed. Please try again.';
+        break;
+      case 'bad-grammar':
+        errorMessage = 'Speech recognition grammar error. Please try again.';
+        break;
+      case 'language-not-supported':
+        errorMessage = 'Language not supported. Please try again.';
+        break;
+      default:
+        errorMessage = `Recording error: ${errorType}. Please try again.`;
+    }
+    
+    setRecordingError(errorMessage);
+    setIsRecording(false);
+    setIsProcessingAudio(false);
+    stopRecordingTimer();
+  };
+
+  // Recording timer functions
+  const startRecordingTimer = () => {
+    setRecordingDuration(0);
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingDuration(prev => prev + 1);
+    }, 1000);
+  };
+
+  const stopRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setRecordingDuration(0);
+  };
+
+  // Format recording duration
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Audio playback simulation
+  const handlePlayPause = () => {
+    setIsPlaying(!isPlaying);
+    if (!isPlaying) {
+      const utterance = new SpeechSynthesisUtterance(questions[currentQuestion - 1].text);
+      utterance.rate = 0.9;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      
+      utterance.onend = () => {
+        setIsPlaying(false);
+      };
+      
+      window.speechSynthesis.speak(utterance);
+    } else {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const handleRelisten = () => {
+    setIsPlaying(true);
+    const utterance = new SpeechSynthesisUtterance(questions[currentQuestion - 1].text);
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    
+    utterance.onend = () => {
+      setIsPlaying(false);
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleViewQuestion = () => {
+    setIsFlipped(!isFlipped);
+  };
+
+  // Simplified start recording function
+  const startRecording = async () => {
+    try {
+      setDebugInfo('Starting recording...');
+      
+      // Check network status
+      if (!isOnline) {
+        setRecordingError('No internet connection. Speech recognition requires an internet connection.');
+        setDebugInfo('Offline - cannot record');
+        return;
+      }
+
+      // Check if already recording or processing
+      if (isRecording || isProcessingAudio) {
+        console.log('Already recording or processing, ignoring start request');
+        setDebugInfo(isRecording ? 'Already recording' : 'Processing in progress');
+        return;
+      }
+
+      // Reset states
+      setUserTranscript('');
+      setInterimTranscript('');
+      setRecordingError('');
+      
+      // Set processing state before starting the recording
+      setIsProcessingAudio(true);
+      retryCountRef.current = 0;
+
+      setDebugInfo('Checking microphone permissions...');
+
+      // Check microphone permissions first
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            volume: 1.0,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        });
+        
+        // Stop the stream immediately as we only needed permission
+        stream.getTracks().forEach(track => track.stop());
+        console.log('Microphone permission granted');
+        setDebugInfo('Microphone permission granted');
+        
+      } catch (permissionError) {
+        console.error('Microphone permission denied:', permissionError);
+        setRecordingError('Microphone access denied. Please allow microphone permissions and try again.');
+        setDebugInfo('Microphone permission denied');
+        setIsProcessingAudio(false);
+        return;
+      }
+
+      // Start speech recognition
+      if (recognitionRef.current) {
+        try {
+          setDebugInfo('Starting speech recognition...');
+          recognitionRef.current.start();
+          console.log('Speech recognition start requested');
+          // Note: isRecording will be set to true in the onstart handler
+        } catch (startError) {
+          console.error('Failed to start speech recognition:', startError);
+          setRecordingError('Failed to start recording. Please try again.');
+          setDebugInfo(`Start error: ${startError.message}`);
+          setIsProcessingAudio(false);
+        }
+      } else {
+        setRecordingError('Speech recognition not available. Please refresh the page.');
+        setDebugInfo('Recognition not available');
+        setIsProcessingAudio(false);
+      }
+      
+    } catch (error) {
+      console.error('Error in startRecording:', error);
+      setRecordingError(`Recording error: ${error.message}. Please try again.`);
+      setDebugInfo(`Recording error: ${error.message}`);
+      setIsProcessingAudio(false);
+    }
+  };
+
+  // Enhanced stop recording
+  const stopRecording = () => {
+    console.log('Stopping recording...');
+    setDebugInfo('Stopping recording...');
+    
+    // Only proceed if we're actually recording
+    if (!isRecording) {
+      console.log('Not currently recording, ignoring stop request');
+      setDebugInfo('Not currently recording');
+      return;
+    }
+    
+    // Set processing state before stopping
+    setIsProcessingAudio(true);
+    
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.error('Error stopping speech recognition:', error);
+        setDebugInfo(`Stop error: ${error.message}`);
+        // Even if there's an error, we should clean up
+        setIsRecording(false);
+        setIsProcessingAudio(false);
+      }
+    } else {
+      // If for some reason recognitionRef is null, still clean up
+      setIsRecording(false);
+      setIsProcessingAudio(false);
+      stopRecordingTimer();
+      setInterimTranscript('');
+    }
+  };
+
+  const retakeRecording = () => {
+    console.log('Retaking recording...');
+    setDebugInfo('Retaking recording...');
+    setUserTranscript('');
+    setInterimTranscript('');
+    setRecordingError('');
+    retryCountRef.current = 0;
+    setIsProcessingAudio(false);
+    
+    // Stop any ongoing speech synthesis
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIsReadingTranscript(false);
+    }
+    
+    // Stop any ongoing recording
+    if (isRecording) {
+      stopRecording();
+    }
+  };
+
+  const handleSubmitAndProceed = () => {
+    if (currentQuestion < questions.length) {
+      setCurrentQuestion(currentQuestion + 1);
+      setIsFlipped(false);
+      setUserTranscript('');
+      setInterimTranscript('');
+      setRecordingError('');
+      retryCountRef.current = 0;
+      setIsReadingTranscript(false);
+      setIsProcessingAudio(false);
+      
+      // Stop any ongoing speech synthesis
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      
+      // Stop any ongoing recording
+      if (isRecording) {
+        stopRecording();
+      }
+    } else {
+      alert('Interview completed! Thank you for your responses.');
+    }
+  };
+
+  // Text-to-Speech for reading transcript
+  const readTranscript = () => {
+    if (!userTranscript) return;
+    
+    if (isReadingTranscript) {
+      window.speechSynthesis.cancel();
+      setIsReadingTranscript(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(userTranscript);
+    utterance.rate = 0.8;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    
+    utterance.onstart = () => {
+      setIsReadingTranscript(true);
+    };
+    
+    utterance.onend = () => {
+      setIsReadingTranscript(false);
+    };
+    
+    utterance.onerror = () => {
+      setIsReadingTranscript(false);
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
+  };
+
+  return (
+    <div className={`ai-interview-container ${isDarkMode ? 'dark' : ''}`}>
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="app-header">
+          <div className="header-content">
+            <h1 className="app-title">AI Based Interview Screening Process</h1>
+            <button
+              onClick={toggleTheme}
+              className={`theme-toggle ${isDarkMode ? 'dark' : ''}`}
+              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="panels-container">
+          {/* Left Panel - AI Agent */}
+          <div className={`panel ai-panel ${isDarkMode ? 'dark' : ''}`}>
+            
+            {/* Card Container */}
+            <div className="card-container">
+              <div className={`card-3d ${isFlipped ? 'flipped' : ''}`}>
+                {/* Front of Card - AI Agent */}
+                <div className="card-face card-front">
+                  <div className="agent-avatar">
+                    <div className="agent-icon">🤖</div>
+                  </div>
+                  <p className="agent-title">AI Interview Agent</p>
+                </div>
+                
+                {/* Back of Card - Question Text */}
+                <div className={`card-face card-back ${isDarkMode ? 'dark' : ''}`}>
+                  <div className="question-content">
+                    <div className="question-number">Question {currentQuestion}</div>
+                    <h3 className="question-title">{questions[currentQuestion - 1]?.text}</h3>
+                    <div className="question-decoration"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* AI Agent Controls */}
+            <div className="controls-container">
+              <div className="primary-controls">
+                <button
+                  onClick={handlePlayPause}
+                  className={`control-btn primary ${isPlaying ? 'playing' : ''}`}
+                >
+                  {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                  <span>{isPlaying ? 'Pause' : 'Play Question'}</span>
+                </button>
+                
+                <button
+                  onClick={handleRelisten}
+                  className="control-btn secondary"
+                  title="Relisten"
+                >
+                  <RotateCcw className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <button
+                onClick={handleViewQuestion}
+                className="control-btn accent"
+              >
+                <span>{isFlipped ? 'Show Agent' : 'View Question'}</span>
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          
+          {/* Right Panel - User Response */}
+          <div className={`panel user-panel ${isDarkMode ? 'dark' : ''}`}>
+            <h2 className="panel-title"></h2>
+            
+            {/* User Avatar */}
+            <div className="user-avatar">
+              <div className="user-icon">👤</div>
+            </div>
+            
+            {/* Voice Input Controls */}
+            <div className="voice-input-section">
+              <div className="voice-input-header"></div>
+              
+              <div className="recording-controls">
+                <div className="controls-row">
+                  <button
+                    onClick={startRecording}
+                    disabled={isRecording || isProcessingAudio || !isOnline}
+                    className={`control-btn record ${isRecording || isProcessingAudio ? 'disabled' : ''}`}
+                  >
+                    <Mic className="w-5 h-5" />
+                    <span>Start Recording</span>
+                  </button>
+                  
+                  <button
+                    onClick={stopRecording}
+                    disabled={!isRecording}
+                    className={`control-btn stop ${!isRecording ? 'disabled' : ''}`}
+                  >
+                    <Square className="w-5 h-5" />
+                    <span>Stop Recording</span>
+                  </button>
+                  
+                  <button
+                    onClick={retakeRecording}
+                    disabled={isProcessingAudio}
+                    className={`control-btn retake ${isProcessingAudio ? 'disabled' : ''}`}
+                  >
+                    <RefreshCw className="w-5 h-5" />
+                    <span>Retake</span>
+                  </button>
+
+                  {(isRecording || isProcessingAudio) && (
+                    <div className="status-indicator inline-status">
+                      <div className="status-dot"></div>
+                      <span className="status-text">
+                        {isRecording 
+                          ? `Recording... ${formatDuration(recordingDuration)}` 
+                          : 'Processing audio...'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {recordingError && (
+                <div className="error-indicator">
+                  <span className="error-text">{recordingError}</span>
+                </div>
+              )}
+            </div>
+            
+            {/* Transcript Section - Always Visible */}
+            <div className="transcript-section">
+              
+              <div className={`transcript-container ${isDarkMode ? 'dark' : ''}`}>
+                <div className="transcript-header">
+                  <h4 className="transcript-title">Your Response Transcript:</h4>
+                  {isReadingTranscript && (
+                    <div className="reading-indicator">
+                      <div className="reading-dot"></div>
+                      <span>Reading...</span>
+                    </div>
+                  )}
+                </div>
+                <div className="transcript-text">
+                  {userTranscript + (interimTranscript ? ' ' + interimTranscript : '') || 'No transcript available. Please start recording your response first.'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Submit Button - At Bottom of Page */}
+        <div className="submit-section-bottom">
+          <button
+            onClick={handleSubmitAndProceed}
+            disabled={!userTranscript}
+            className={`submit-btn-bottom ${userTranscript ? 'enabled' : 'disabled'}`}
+          >
+            <Send className="w-6 h-6" />
+            <span>Submit & Proceed to Next Question</span>
+            <ArrowRight className="w-6 h-6" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AIInterviewInterface;
