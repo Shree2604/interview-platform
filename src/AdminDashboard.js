@@ -121,11 +121,12 @@ function AdminDashboard({ onBack }) {
     const statusConfig = {
       pending: { color: 'orange', icon: Clock, text: 'Pending' },
       processing: { color: 'blue', icon: RefreshCw, text: 'Processing' },
+      in_progress: { color: 'blue', icon: RefreshCw, text: 'In Progress' },
       completed: { color: 'green', icon: CheckCircle, text: 'Completed' },
       interviewed: { color: 'purple', icon: UserCheck, text: 'Interviewed' }
     };
 
-    const config = statusConfig[status];
+    const config = statusConfig[status] || { color: 'blue', icon: RefreshCw, text: (status || 'Unknown').toString().replace(/_/g, ' ') };
     const Icon = config.icon;
 
     return (
@@ -138,15 +139,14 @@ function AdminDashboard({ onBack }) {
 
   // Export data to CSV
   const exportToCSV = () => {
-    const headers = ['Name', 'Email', 'Registration ID', 'Status', 'Submitted At', 'Skills', 'Experience'];
+    const headers = ['Name', 'Email', 'Registration ID', 'Status', 'Submitted At', 'Summary'];
     const csvData = filteredRegistrations.map(reg => [
       reg.name,
       reg.email,
       reg.registrationId,
       reg.status,
       new Date(reg.submittedAt).toLocaleDateString(),
-      reg.resumeData?.skills?.join(', ') || '',
-      reg.resumeData?.experience || ''
+      reg.resumeData?.summary || ''
     ]);
 
     const csvContent = [headers, ...csvData]
@@ -351,7 +351,6 @@ function AdminDashboard({ onBack }) {
                       <option value="pending">Pending</option>
                       <option value="processing">Processing</option>
                       <option value="completed">Completed</option>
-                      <option value="interviewed">Interviewed</option>
                     </select>
                   </div>
                 </td>
@@ -413,34 +412,37 @@ function AdminDashboard({ onBack }) {
                 <h3>Resume Analysis</h3>
                 <div className="detail-grid">
                   <div className="detail-item full-width">
-                    <label>Skills:</label>
-                    <div className="skills-list">
-                      {selectedRegistration.resumeData?.skills?.map((skill, index) => (
-                        <span key={index} className="skill-badge">
-                          {skill}
-                        </span>
-                      ))}
+                    <label>Summary:</label>
+                    <span>{selectedRegistration.resumeData?.summary || 'Not available'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Interview Q&A Section */}
+              <div className="detail-section">
+                <h3>Interview Q&A</h3>
+                <div className="detail-grid">
+                  {(selectedRegistration.interviewData?.questions || []).length === 0 ? (
+                    <div className="detail-item full-width">
+                      <span>No interview questions recorded yet.</span>
                     </div>
-                  </div>
-                  <div className="detail-item full-width">
-                    <label>Experience:</label>
-                    <span>{selectedRegistration.resumeData?.experience || 'Not specified'}</span>
-                  </div>
-                  <div className="detail-item full-width">
-                    <label>Education:</label>
-                    <span>{selectedRegistration.resumeData?.education || 'Not specified'}</span>
-                  </div>
-                  <div className="detail-item full-width">
-                    <label>Contact Info:</label>
-                    <span>{selectedRegistration.resumeData?.contactInfo || 'Not specified'}</span>
+                  ) : (
+                    selectedRegistration.interviewData?.questions?.map((q, idx) => (
+                      <div key={idx} className="detail-item full-width">
+                        <label>Question {idx + 1}:</label>
+                        <div style={{ marginBottom: '0.35rem' }}>{q?.question || '—'}</div>
+                        <label>Answer:</label>
+                        <div>{q?.answer ? q.answer : 'Not answered'}</div>
+                      </div>
+                    ))
+                  )}
+                  <div className="detail-item">
+                    <label>Interview Started:</label>
+                    <span>{selectedRegistration.interviewData?.startedAt ? new Date(selectedRegistration.interviewData.startedAt).toLocaleString() : '—'}</span>
                   </div>
                   <div className="detail-item">
-                    <label>Original File:</label>
-                    <span>{selectedRegistration.resumeData?.originalFileName}</span>
-                  </div>
-                  <div className="detail-item">
-                    <label>File Size:</label>
-                    <span>{(selectedRegistration.resumeData?.fileSize / 1024).toFixed(1)} KB</span>
+                    <label>Interview Completed:</label>
+                    <span>{selectedRegistration.interviewData?.completedAt ? new Date(selectedRegistration.interviewData.completedAt).toLocaleString() : '—'}</span>
                   </div>
                 </div>
               </div>

@@ -4,9 +4,17 @@ import './App.css';
 import AdminDashboard from './AdminDashboard';
 import AdminLogin from './AdminLogin';
 import AIInterviewInterface from './AIInterviewInterface';
+import ThankYou from './ThankYou';
+import Exit from './Exit';
+
+// Utility function to generate a unique session token
+const generateSessionToken = () => {
+  return 'session_' + Math.random().toString(36).substr(2, 9);
+};
 
 function App() {
-  const [currentStep, setCurrentStep] = useState('invitation'); // 'invitation', 'form', 'processing', 'complete', 'interview', 'admin', 'admin-login'
+  // Check for existing session on initial load
+  const [currentStep, setCurrentStep] = useState('invitation');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -15,7 +23,11 @@ function App() {
   });
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    return localStorage.getItem('isAdminAuthenticated') === 'true';
+  });
+  const [sessionToken, setSessionToken] = useState(localStorage.getItem('interviewSessionToken') || null);
+  const [interviewData, setInterviewData] = useState(null);
 
   const handleStartInterview = () => {
     setCurrentStep('form');
@@ -100,6 +112,12 @@ function App() {
         formDataToSend.append('registrationId', formData.registrationId);
         formDataToSend.append('resume', formData.resume);
 
+        console.log('Submitting form with data:', {
+          name: formData.name,
+          email: formData.email,
+          registrationId: formData.registrationId
+        });
+
         const response = await fetch('http://localhost:5000/api/submit-interview-form', {
           method: 'POST',
           body: formDataToSend,
@@ -113,17 +131,63 @@ function App() {
           throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
         }
 
-        const result = await response.json();
+        let result;
+        try {
+          // Log the raw response for debugging
+          console.log('Raw response:', response);
+          result = await response.json();
+        } catch (jsonError) {
+          console.error('Failed to parse JSON from server:', jsonError);
+          alert('Registration failed: Server returned an invalid response. Please contact support.');
+          setIsSubmitting(false);
+          return;
+        }
         console.log('Form submitted successfully:', result);
+        console.log('Result data:', result.data);
+        if (result.data) {
+          console.log('Result data keys:', Object.keys(result.data));
+        }
+        // Extract the session token from the response (robust)
+        let sessionToken = null;
+        if (result.data && typeof result.data === 'object') {
+          sessionToken = result.data.sessionToken || result.data.token || null;
+        }
+        if (!sessionToken && result.sessionToken) {
+          sessionToken = result.sessionToken;
+        }
+        if (!sessionToken && result.token) {
+          sessionToken = result.token;
+        }
         
-        // Move to processing step
-        setCurrentStep('processing');
-        
-        // Simulate processing time
-        setTimeout(() => {
-          setCurrentStep('complete');
-        }, 3000);
-        
+        if (sessionToken) {
+          console.log('Session token received:', sessionToken);
+          // Store the session token in localStorage
+          localStorage.setItem('interviewSessionToken', sessionToken);
+          setSessionToken(sessionToken);
+          // Prepare interview data
+          const interviewData = {
+            ...(result.data || result),
+            sessionToken: sessionToken,
+            interviewData: {
+              questions: [],
+              currentQuestionIndex: -1,
+              isCompleted: false,
+              ...(result.data?.interviewData || result.interviewData || {})
+            }
+          };
+          console.log('Setting interview data:', interviewData);
+          setInterviewData(interviewData);
+          // Move directly to interview step
+          setCurrentStep('interview');
+        } else {
+          console.error('No session token found in response:', result);
+          if (result.data) {
+            alert('Registration failed: No session token in response. Data keys: ' + Object.keys(result.data).join(', '));
+          } else {
+            alert('Registration failed: No session token received from server. Please contact support or try again.');
+          }
+          throw new Error('No session token received from server. Please try again.');
+        }
       } catch (error) {
         console.error('Error submitting form:', error);
         alert(`Error: ${error.message}. Please try again.`);
@@ -147,14 +211,118 @@ function App() {
     }
   };
 
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      const token = localStorage.getItem('interviewSessionToken');
+      if (token) {
+        try {
+          console.log('Checking existing session with token:', token);
+          
+          // First try the session token endpoint
+          let response = await fetch(`http://localhost:5000/api/interview/session/${token}`);
+          
+          // If that fails, try with the registration ID as a fallback
+          if (!response.ok) {
+            console.log('Session token not found, trying with registration ID');
+            response = await fetch(`http://localhost:5000/api/registrations/${token}`);
+          }
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('Session data:', data);
+            
+            // Normalize the response data structure
+            const sessionData = data.data || data;
+            
+            // Ensure we have the session token
+            const actualToken = sessionData.sessionToken || token;
+            
+            // Update session token in localStorage if it was missing
+            if (!sessionData.sessionToken) {
+              localStorage.setItem('interviewSessionToken', actualToken);
+              
+              // Update the registration with the session token
+              try {
+                await fetch(`http://localhost:5000/api/registrations/${sessionData.registrationId || token}/session`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ sessionToken: actualToken })
+                });
+              } catch (updateError) {
+                console.error('Error updating session token:', updateError);
+              }
+            }
+            
+            // Set the interview data and token
+            setInterviewData(sessionData);
+            setSessionToken(actualToken);
+            
+            // Update form data if not already set
+            if (!formData.name) {
+              setFormData({
+                name: sessionData.name || '',
+                email: sessionData.email || '',
+                registrationId: sessionData.registrationId || token,
+                resume: { 
+                  name: sessionData.resumeData?.originalFileName || 'resume.docx' 
+                }
+              });
+            }
+            
+            // Determine the current step based on interview status
+            if (sessionData.status === 'completed') {
+              console.log('Restoring completed interview session');
+              setCurrentStep('complete');
+            } else if (sessionData.status === 'in_progress' || sessionData.status === 'processing') {
+              console.log('Restoring in-progress interview session');
+              setCurrentStep('interview');
+            } else {
+              console.log('No active interview found, clearing session');
+              localStorage.removeItem('interviewSessionToken');
+              setSessionToken(null);
+            }
+          } else {
+            console.log('Invalid session, clearing token');
+            // Clear invalid session
+            localStorage.removeItem('interviewSessionToken');
+            setSessionToken(null);
+          }
+        } catch (error) {
+          console.error('Error checking session:', error);
+          localStorage.removeItem('interviewSessionToken');
+          setSessionToken(null);
+        }
+      } else {
+        console.log('No session token found');
+      }
+    };
+
+    if (isAdminAuthenticated) {
+      setCurrentStep('admin');
+    } else {
+      checkExistingSession();
+    }
+  }, [isAdminAuthenticated, formData.name]);
+
   const handleAdminLogin = () => {
     setIsAdminAuthenticated(true);
+    localStorage.setItem('isAdminAuthenticated', 'true');
     setCurrentStep('admin');
   };
 
   const handleAdminLogout = () => {
     setIsAdminAuthenticated(false);
+    localStorage.removeItem('isAdminAuthenticated');
     setCurrentStep('invitation');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('interviewSessionToken');
+    setSessionToken(null);
+    setInterviewData(null);
+    setCurrentStep('invitation');
+    window.location.reload(); // Force a full page refresh to reset all state
   };
 
   // Invitation Step
@@ -453,8 +621,42 @@ function App() {
   if (currentStep === 'interview') {
     return (
       <AIInterviewInterface 
-        onComplete={() => setCurrentStep('complete')} 
+        onComplete={() => {
+          // Clear session token upon interview completion
+          localStorage.removeItem('interviewSessionToken');
+          setSessionToken(null);
+          setInterviewData(null);
+          setCurrentStep('thankyou');
+        }}
+        onExit={() => {
+          localStorage.removeItem('interviewSessionToken');
+          setSessionToken(null);
+          setInterviewData(null);
+          setCurrentStep('exit');
+        }} 
       />
+    );
+  }
+
+  // Thank You Step
+  if (currentStep === 'thankyou') {
+    return (
+      <ThankYou 
+        onReturnHome={() => {
+          // Ensure session is cleared and go to invitation home
+          localStorage.removeItem('interviewSessionToken');
+          setSessionToken(null);
+          setInterviewData(null);
+          setCurrentStep('invitation');
+        }}
+      />
+    );
+  }
+
+  // Exit Step
+  if (currentStep === 'exit') {
+    return (
+      <Exit applicantName={formData.name || 'Applicant'} />
     );
   }
 

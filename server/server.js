@@ -5,6 +5,9 @@ const path = require('path');
 const cors = require('cors');
 const mammoth = require('mammoth');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
 require('dotenv').config();
 
 const app = express();
@@ -55,6 +58,25 @@ if (!fs.existsSync('uploads')) {
 }
 
 // Interview Registration Schema
+const questionAnswerSchema = new mongoose.Schema({
+  question: {
+    type: String,
+    required: true
+  },
+  answer: {
+    type: String,
+    default: ''
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  },
+  isAnswered: {
+    type: Boolean,
+    default: false
+  }
+});
+
 const interviewRegistrationSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -79,29 +101,26 @@ const interviewRegistrationSchema = new mongoose.Schema({
       type: String,
       required: [true, 'Resume text extraction is required']
     },
-    skills: [{
+    summary: {
       type: String,
-      trim: true
-    }],
-    experience: {
-      type: String,
-      trim: true
-    },
-    education: {
-      type: String,
-      trim: true
-    },
-    contactInfo: {
-      type: String,
-      trim: true
-    },
-    originalFileName: {
-      type: String,
-      required: true
-    },
-    fileSize: {
+      required: [true, 'Resume summary is required']
+    }
+  },
+  interviewData: {
+    questions: [questionAnswerSchema],
+    currentQuestionIndex: {
       type: Number,
-      required: true
+      default: -1
+    },
+    isCompleted: {
+      type: Boolean,
+      default: false
+    },
+    startedAt: {
+      type: Date
+    },
+    completedAt: {
+      type: Date
     }
   },
   submittedAt: {
@@ -110,93 +129,513 @@ const interviewRegistrationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'completed', 'interviewed'],
+    enum: ['pending', 'processing', 'in_progress', 'completed', 'interviewed'],
     default: 'pending'
+  },
+  sessionToken: {
+    type: String,
+    unique: true,
+    sparse: true
   }
 });
 
 const InterviewRegistration = mongoose.model('InterviewRegistration', interviewRegistrationSchema);
 
-// Function to extract information from resume text
-function extractResumeInfo(text) {
-  const extractedData = {
-    skills: [],
-    experience: '',
-    education: '',
-    contactInfo: ''
+// Call LM Studio (OpenAI-compatible) chat completions API without extra deps
+async function callLmStudioChat({ messages, temperature = 0.2, max_tokens, stop }) {
+  const endpoint = process.env.LM_STUDIO_URL || 'http://127.0.0.1:1234/v1/chat/completions';
+  const model = process.env.LM_MODEL || 'phi-3-mini-128k-instruct';
+
+  console.log(`[LM] Sending request to ${endpoint} with model: ${model}`);
+  console.log('Messages:', JSON.stringify(messages, null, 2));
+
+  const payload = JSON.stringify({
+    model,
+    messages,
+    temperature,
+    max_tokens: max_tokens || 2000,
+    stop: stop || [],
+    stream: false
+  });
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: payload,
+      timeout: 300000
+    });
+
+    const data = await response.json();
+    console.log('[LM] Response status:', response.status);
+    console.log('[LM] Response data:', JSON.stringify(data, null, 2));
+
+    if (!response.ok) {
+      throw new Error(`LM Studio HTTP ${response.status}: ${JSON.stringify(data)}`);
+    }
+
+    // Handle different response formats
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      return data.choices[0].message.content;
+    } else if (data.choices && data.choices[0] && data.choices[0].text) {
+      return data.choices[0].text;
+    } else if (data.choices && data.choices[0]) {
+      return JSON.stringify(data.choices[0]);
+    } else if (data.content) {
+      return data.content;
+    } else if (typeof data === 'string') {
+      return data;
+    } else if (typeof data === 'object') {
+      return JSON.stringify(data);
+    }
+
+    throw new Error('LM Studio response format not recognized');
+  } catch (error) {
+    console.error('[LM] Error calling LM Studio:', error);
+    throw new Error(`Failed to get response from LM Studio: ${error.message}`);
+  }
+  return content;
+}
+
+// Return constant interview questions (LLM not used for questions)
+function generateInterviewQuestions() {
+  return [
+    'Hello, Thank you for joining us today. School Professionals staffs substitute teachers in Charter, Private, and Independent schools, as well as NYC’s Pre-K for All (UPK) program. We work with schools across all five boroughs, offering both short- and long-term assignments, and you choose which fit your schedule. The only requirement is working at least four days per month. This is a great way to gain classroom experience while working at different schools. Are you interested in moving forward?',
+    'How did you hear about us?'
+  ];
+}
+
+// Summarize resume text via LM Studio (returns plain summary string)
+async function summarizeResumeWithLLM(text) {
+  const system = 'You are an expert resume summarizer. Output a concise paragraph (60-120 words) summarizing the candidate profile. No markdown.';
+  const user = `Summarize the following resume text. Focus on years of experience, key skills/technologies, notable roles/achievements, and education if present. Avoid bullet points and keep it objective.\n\nRESUME TEXT START\n${text}\nRESUME TEXT END`;
+
+  const content = await callLmStudioChat({
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    temperature: 0.2
+  });
+
+  return String(content).replace(/^```(?:\w+)?/g, '').replace(/```$/g, '').trim();
+}
+
+// Multi-agent orchestration using LangGraph (explicit nodes/edges)
+async function runMultiAgentFlow({ name, email, registrationId, extractedText }) {
+  const { buildRegistrationGraph } = require('./graph/registrationFlow.js');
+  const { createRegistrationAgent } = require('./agents/registrationAgent.js');
+  const { createResumeAgent } = require('./agents/resumeAgent.js');
+  const { createQuestionsAgent } = require('./agents/questionsAgent.js');
+  const { createPersistAgent } = require('./agents/persistAgent.js');
+
+  const registrationAgent = createRegistrationAgent({ InterviewRegistration });
+  const resumeAgent = createResumeAgent({ summarizeResumeWithLLM });
+  const questionsAgent = createQuestionsAgent({ generateInterviewQuestions });
+  const persistAgent = createPersistAgent({ InterviewRegistration });
+
+  const app = buildRegistrationGraph({ registrationAgent, resumeAgent, questionsAgent, persistAgent });
+
+  const state = {
+    name,
+    email,
+    registrationId,
+    extractedText,
+    validationOk: false,
+    summaryText: '',
+    questions: [],
+    sessionToken: '',
+    registration: null,
+    error: null
   };
 
-  // Extract skills (common programming languages, frameworks, tools)
-  const skillPatterns = [
-    /javascript|js|react|node\.js|python|java|c\+\+|c#|php|ruby|go|rust|swift|kotlin/gi,
-    /html|css|sass|less|bootstrap|tailwind|material-ui/gi,
-    /mongodb|mysql|postgresql|sqlite|redis|elasticsearch/gi,
-    /docker|kubernetes|aws|azure|gcp|heroku|netlify/gi,
-    /git|github|gitlab|bitbucket|jenkins|travis|circleci/gi,
-    /agile|scrum|kanban|jira|trello|asana/gi,
-    /machine learning|ml|ai|artificial intelligence|data science/gi,
-    /typescript|angular|vue|svelte|next\.js|nuxt/gi
-  ];
-
-  skillPatterns.forEach(pattern => {
-    const matches = text.match(pattern);
-    if (matches) {
-      extractedData.skills.push(...matches.map(skill => skill.toLowerCase()));
-    }
-  });
-
-  // Remove duplicates and limit to top skills
-  extractedData.skills = [...new Set(extractedData.skills)].slice(0, 15);
-
-  // Extract experience section
-  const experiencePatterns = [
-    /experience|work history|employment|professional background/gi,
-    /(?:worked|employed|position|role|job).*?(?:years?|months?)/gi
-  ];
-
-  experiencePatterns.forEach(pattern => {
-    const match = text.match(pattern);
-    if (match) {
-      extractedData.experience = match[0];
-    }
-  });
-
-  // Extract education section
-  const educationPatterns = [
-    /education|academic|degree|university|college|school/gi,
-    /bachelor|master|phd|diploma|certificate/gi
-  ];
-
-  educationPatterns.forEach(pattern => {
-    const match = text.match(pattern);
-    if (match) {
-      extractedData.education = match[0];
-    }
-  });
-
-  // Extract contact information
-  const contactPatterns = [
-    /[\w\.-]+@[\w\.-]+\.\w+/g, // Email
-    /(\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g, // Phone
-    /linkedin\.com\/in\/[\w-]+/gi, // LinkedIn
-    /github\.com\/[\w-]+/gi // GitHub
-  ];
-
-  contactPatterns.forEach(pattern => {
-    const matches = text.match(pattern);
-    if (matches) {
-      extractedData.contactInfo += matches.join(', ') + ' ';
-    }
-  });
-
-  return extractedData;
+  return await app.invoke(state);
 }
+
+// Test LM Studio connection and response format
+app.get('/api/test/lmstudio', async (req, res) => {
+  try {
+    const testResponse = await callLmStudioChat({
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'Just say "Hello, I\'m connected!"' }
+      ],
+      temperature: 0.1
+    });
+    
+    res.json({
+      success: true,
+      message: 'Successfully connected to LM Studio',
+      response: testResponse
+    });
+  } catch (error) {
+    console.error('LM Studio test error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to connect to LM Studio',
+      error: error.message
+    });
+  }
+});
+
+// LM Studio connectivity check
+app.get('/api/lmstudio/ping', async (req, res) => {
+  try {
+    // Lightweight models listing to test connectivity
+    const endpoint = (process.env.LM_STUDIO_URL || 'http://127.0.0.1:1234/v1/chat/completions').replace('/v1/chat/completions', '/v1/models');
+    const url = new URL(endpoint);
+    const isHttps = url.protocol === 'https:';
+    const transport = isHttps ? https : http;
+    const options = {
+      method: 'GET',
+      hostname: url.hostname,
+      port: url.port || (isHttps ? 443 : 80),
+      path: url.pathname + (url.search || ''),
+      headers: { 'Accept': 'application/json' },
+      timeout: 8000
+    };
+    const payload = await new Promise((resolve, reject) => {
+      const req2 = transport.request(options, (resp) => {
+        let data = '';
+        resp.on('data', (c) => { data += c; });
+        resp.on('end', () => resolve(JSON.stringify({ statusCode: resp.statusCode, body: data })));
+      });
+      req2.on('error', reject);
+      req2.on('timeout', () => req2.destroy(new Error('LM Studio /models timeout')));
+      req2.end();
+    });
+    const env = JSON.parse(payload);
+    const models = JSON.parse(env.body || '{}');
+    res.json({ ok: true, statusCode: env.statusCode, models });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // Routes
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running', timestamp: new Date() });
+});
+
+// Simple Yes/No classifier endpoint using LM Studio with heuristic fallback
+app.post('/api/nlu/yesno', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text) {
+      return res.status(400).json({ success: false, message: 'text is required' });
+    }
+
+    // Prepare LM prompt
+    const system = 'You are a precise intent classifier. Given a short user reply, classify it as yes, no, or unclear. Output STRICT JSON with fields: label ("yes"|"no"|"unclear"), confidence (0-1).';
+    const user = `Classify the intent of the following reply strictly into yes/no/unclear. Return JSON only.\nReply: "${text}"`;
+
+    let classification = null;
+    try {
+      const content = await callLmStudioChat({
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature: 0.0,
+        max_tokens: 200
+      });
+      const cleaned = String(content).replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed && typeof parsed === 'object' && parsed.label) {
+        classification = {
+          label: String(parsed.label).toLowerCase() === 'yes' ? 'yes' : (String(parsed.label).toLowerCase() === 'no' ? 'no' : 'unclear'),
+          confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0))
+        };
+      }
+    } catch (e) {
+      // Fall through to heuristic
+    }
+
+    // Heuristic fallback
+    if (!classification) {
+      const textLower = text.toLowerCase();
+      const affirm = [
+        'yes','y','yep','yeah','yah','ya','yup','sure','definitely','of course','absolutely','certainly','correct','right','ok','okay','k','mmhmm','mhm','uh-huh','affirmative','interested','count me in','sounds good','proceed','go ahead','let\'s do it','indeed','aye','si','alright','all right','roger','10-4','positive','keen'
+      ];
+      const neg = [
+        'no','n','nope','nah','nay','not really','don\'t','do not','no thanks','not interested','negative','pass','skip','rather not','not now','maybe later','i\'m fine','i am fine','not today','decline','hard pass','no way'
+      ];
+      const containsAny = (arr) => arr.some(p => textLower.includes(p));
+      const label = containsAny(affirm) && !containsAny(neg) ? 'yes' : (containsAny(neg) && !containsAny(affirm) ? 'no' : 'unclear');
+      classification = { label, confidence: label === 'unclear' ? 0.5 : 0.9 };
+    }
+
+    res.json({ success: true, ...classification });
+  } catch (error) {
+    console.error('Error in yes/no classification:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', label: 'unclear', confidence: 0 });
+  }
+});
+
+// Mark interview as started (capture start time)
+app.post('/api/interview/start', async (req, res) => {
+  try {
+    const { registrationId, sessionToken } = req.body || {};
+
+    let registration = null;
+    if (sessionToken) {
+      registration = await InterviewRegistration.findOne({ sessionToken });
+    }
+    if (!registration && registrationId) {
+      registration = await InterviewRegistration.findOne({ registrationId });
+    }
+    if (!registration) {
+      return res.status(404).json({ success: false, message: 'Registration not found' });
+    }
+
+    if (!registration.interviewData.startedAt) {
+      registration.interviewData.startedAt = new Date();
+      if (registration.status === 'processing') {
+        registration.status = 'in_progress';
+      }
+      await registration.save();
+    }
+
+    return res.json({
+      success: true,
+      message: 'Interview start recorded',
+      data: {
+        registrationId: registration.registrationId,
+        startedAt: registration.interviewData.startedAt,
+        status: registration.status
+      }
+    });
+  } catch (error) {
+    console.error('Error marking interview start:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Get interview session by token
+app.get('/api/interview/session/:token', async (req, res) => {
+  try {
+    const registration = await InterviewRegistration.findOne({ 
+      $or: [
+        { sessionToken: req.params.token },
+        { registrationId: req.params.token }
+      ],
+      status: { $in: ['processing', 'in_progress', 'completed'] }
+    }).select('-resumeData.extractedText');
+    
+    if (!registration) {
+      return res.status(404).json({ error: 'Session not found or expired' });
+    }
+    
+    // If we found by registrationId and sessionToken is not set, update it
+    if (!registration.sessionToken) {
+      registration.sessionToken = req.params.token;
+      await registration.save();
+    }
+    
+    res.json({
+      ...registration.toObject(),
+      currentQuestion: registration.interviewData.questions[registration.interviewData.currentQuestionIndex] || null
+    });
+  } catch (error) {
+    console.error('Error fetching interview session:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Submit answer for current question
+app.post('/api/interview/answer', async (req, res) => {
+  try {
+    const { registrationId, sessionToken, answer, questionIndex, questionText } = req.body;
+
+    // Find registration by sessionToken first, then by registrationId
+    let registration = null;
+    if (sessionToken) {
+      registration = await InterviewRegistration.findOne({ sessionToken });
+    }
+    if (!registration && registrationId) {
+      registration = await InterviewRegistration.findOne({ registrationId });
+    }
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+
+    // Determine index to update
+    const idx = (typeof questionIndex === 'number' && !isNaN(questionIndex))
+      ? questionIndex
+      : registration.interviewData.currentQuestionIndex;
+
+    if (idx < 0) {
+      return res.status(400).json({ error: 'Invalid question index' });
+    }
+
+    // Ensure questions array has an entry at idx; create if missing
+    if (registration.interviewData.questions.length <= idx) {
+      // Create new question entry using provided questionText or a placeholder
+      registration.interviewData.questions[idx] = {
+        question: questionText || `Question ${idx + 1}`,
+        answer: '',
+        isAnswered: false,
+        timestamp: new Date()
+      };
+    }
+
+    // Update currentQuestionIndex if needed
+    if (registration.interviewData.currentQuestionIndex < idx) {
+      registration.interviewData.currentQuestionIndex = idx;
+    }
+
+    // Mark status as in_progress on first answer
+    if (registration.status === 'processing') {
+      registration.status = 'in_progress';
+      if (!registration.interviewData.startedAt) {
+        registration.interviewData.startedAt = new Date();
+      }
+    }
+
+    // Save answer
+    registration.interviewData.questions[idx].answer = answer || '';
+    registration.interviewData.questions[idx].isAnswered = true;
+    registration.interviewData.questions[idx].timestamp = new Date();
+
+    await registration.save();
+
+    res.json({ success: true, nextQuestionIndex: idx + 1 });
+  } catch (error) {
+    console.error('Error submitting answer:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get next question
+app.get('/api/interview/next-question/:registrationId', async (req, res) => {
+  try {
+    const registration = await InterviewRegistration.findOne({ 
+      registrationId: req.params.registrationId 
+    });
+    
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+    
+    // If interview is completed, return completion status
+    if (registration.interviewData.isCompleted) {
+      return res.json({ 
+        interviewCompleted: true,
+        message: 'Interview completed successfully' 
+      });
+    }
+    
+    // If this is the first question, update status to in_progress
+    if (registration.status === 'processing') {
+      registration.status = 'in_progress';
+      registration.interviewData.startedAt = new Date();
+      await registration.save();
+    }
+    
+    const nextQuestionIndex = registration.interviewData.questions.length;
+    
+    // Generate or retrieve next question based on interview progress
+    // Fixed set of 3 questions
+    const questions = generateInterviewQuestions();
+    
+    if (nextQuestionIndex < questions.length) {
+      const newQuestion = {
+        question: questions[nextQuestionIndex],
+        isAnswered: false
+      };
+      
+      registration.interviewData.questions.push(newQuestion);
+      registration.interviewData.currentQuestionIndex = nextQuestionIndex;
+      await registration.save();
+      
+      return res.json({
+        questionId: nextQuestionIndex,
+        question: newQuestion.question,
+        isLastQuestion: nextQuestionIndex === questions.length - 1
+      });
+    } else {
+      // No more questions, mark interview as completed
+      registration.interviewData.isCompleted = true;
+      registration.interviewData.completedAt = new Date();
+      registration.status = 'completed';
+      await registration.save();
+      
+      res.json({ 
+        interviewCompleted: true,
+        message: 'Interview completed successfully' 
+      });
+    }
+  } catch (error) {
+    console.error('Error getting next question:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Mark interview as completed (capture end time)
+app.post('/api/interview/complete', async (req, res) => {
+  try {
+    const { registrationId, sessionToken } = req.body || {};
+
+    // Find registration by sessionToken first, then by registrationId
+    let registration = null;
+    if (sessionToken) {
+      registration = await InterviewRegistration.findOne({ sessionToken });
+    }
+    if (!registration && registrationId) {
+      registration = await InterviewRegistration.findOne({ registrationId });
+    }
+    if (!registration) {
+      return res.status(404).json({ success: false, message: 'Registration not found' });
+    }
+
+    // If already completed, return existing completion time
+    if (registration.interviewData?.isCompleted) {
+      return res.json({
+        success: true,
+        message: 'Interview already completed',
+        data: {
+          registrationId: registration.registrationId,
+          completedAt: registration.interviewData.completedAt,
+          startedAt: registration.interviewData.startedAt,
+          status: registration.status
+        }
+      });
+    }
+
+    // Ensure startedAt is set if interview was in progress without prior start time
+    if (!registration.interviewData.startedAt) {
+      registration.interviewData.startedAt = new Date();
+      if (registration.status === 'processing') {
+        registration.status = 'in_progress';
+      }
+    }
+
+    // Mark completion and set timestamps
+    registration.interviewData.isCompleted = true;
+    registration.interviewData.completedAt = new Date();
+    registration.status = 'completed';
+
+    await registration.save();
+
+    res.json({
+      success: true,
+      message: 'Interview marked as completed',
+      data: {
+        registrationId: registration.registrationId,
+        completedAt: registration.interviewData.completedAt,
+        startedAt: registration.interviewData.startedAt,
+        status: registration.status
+      }
+    });
+  } catch (error) {
+    console.error('Error completing interview:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 });
 
 // Submit interview registration form
@@ -219,23 +658,7 @@ app.post('/api/submit-interview-form', upload.single('resume'), async (req, res)
       });
     }
 
-    // Check if registration ID already exists
-    const existingRegistration = await InterviewRegistration.findOne({ registrationId });
-    if (existingRegistration) {
-      return res.status(409).json({
-        success: false,
-        message: 'Registration ID already exists'
-      });
-    }
-
-    // Check if email already exists
-    const existingEmail = await InterviewRegistration.findOne({ email });
-    if (existingEmail) {
-      return res.status(409).json({
-        success: false,
-        message: 'Email already registered'
-      });
-    }
+    // Uniqueness will be rechecked in multi-agent flow as well
 
     // Extract text from the uploaded .docx file
     let extractedText = '';
@@ -250,8 +673,14 @@ app.post('/api/submit-interview-form', upload.single('resume'), async (req, res)
       });
     }
 
-    // Extract structured information from the text
-    const extractedInfo = extractResumeInfo(extractedText);
+    // Orchestrate via multi-agent flow (registration, resume summary, questions, persistence)
+    let flowResult = null;
+    try {
+      flowResult = await runMultiAgentFlow({ name, email, registrationId, extractedText });
+    } catch (e) {
+      console.error('Multi-agent flow error:', e);
+      flowResult = { error: e.message };
+    }
 
     // Delete the uploaded file after extraction
     try {
@@ -262,23 +691,71 @@ app.post('/api/submit-interview-form', upload.single('resume'), async (req, res)
       // Continue even if file deletion fails
     }
 
-    // Create new registration with extracted data
-    const registration = new InterviewRegistration({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      registrationId: registrationId.trim(),
-      resumeData: {
-        extractedText: extractedText,
-        skills: extractedInfo.skills,
-        experience: extractedInfo.experience,
-        education: extractedInfo.education,
-        contactInfo: extractedInfo.contactInfo,
-        originalFileName: req.file.originalname,
-        fileSize: req.file.size
-      }
-    });
+    if (flowResult?.error) {
+      const message = String(flowResult.error);
+      const isConflict = /already/i.test(message);
+      return res.status(isConflict ? 409 : 400).json({ success: false, message });
+    }
 
-    await registration.save();
+    let registration = flowResult?.registration;
+    let sessionToken = flowResult?.sessionToken;
+    let summaryText = flowResult?.summaryText || '';
+    if (!registration || !sessionToken) {
+      console.warn('Flow did not return registration/sessionToken. Falling back to direct persistence. Flow state:', {
+        hasRegistration: Boolean(registration),
+        hasSessionToken: Boolean(sessionToken),
+        hasSummary: Boolean(summaryText)
+      });
+
+      // Fallback: ensure summaryText exists
+      if (!summaryText) {
+        try {
+          summaryText = await summarizeResumeWithLLM(extractedText);
+        } catch (_) {
+          const compact = String(extractedText || '').replace(/\s+/g, ' ').trim();
+          summaryText = compact ? compact.slice(0, 400) + (compact.length > 400 ? '…' : '') : 'Resume submitted. Summary unavailable.';
+        }
+      }
+
+      // Fallback: generate session token
+      if (!sessionToken) {
+        const crypto = require('node:crypto');
+        sessionToken = `session_${crypto.randomBytes(16).toString('hex')}`;
+      }
+
+      // Persist directly
+      try {
+        registration = new InterviewRegistration({
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          registrationId: registrationId.trim(),
+          sessionToken,
+          status: 'processing',
+          resumeData: {
+            extractedText,
+            summary: summaryText
+          },
+          interviewData: {
+            questions: generateInterviewQuestions().map((q) => ({
+              question: q,
+              answer: '',
+              isAnswered: false,
+              timestamp: null
+            })),
+            currentQuestionIndex: -1,
+            isCompleted: false,
+            startedAt: null,
+            completedAt: null
+          }
+        });
+        await registration.save();
+      } catch (persistError) {
+        console.error('Direct persistence fallback failed:', persistError);
+        return res.status(500).json({ success: false, message: 'Registration failed to persist' });
+      }
+    }
+
+    console.log('New registration created with session token:', sessionToken);
 
     res.status(201).json({
       success: true,
@@ -290,9 +767,9 @@ app.post('/api/submit-interview-form', upload.single('resume'), async (req, res)
         registrationId: registration.registrationId,
         submittedAt: registration.submittedAt,
         status: registration.status,
-        extractedSkills: extractedInfo.skills,
-        extractedExperience: extractedInfo.experience,
-        extractedEducation: extractedInfo.education
+        sessionToken: sessionToken, // Use the generated variable directly
+        // Return summary for client visibility
+        summary: summaryText
       }
     });
 
@@ -377,10 +854,10 @@ app.patch('/api/registrations/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
     
-    if (!status || !['pending', 'processing', 'completed', 'interviewed'].includes(status)) {
+    if (!status || !['pending', 'processing', 'in_progress', 'completed', 'interviewed'].includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Valid status is required: pending, processing, completed, or interviewed'
+        message: 'Valid status is required: pending, processing, in_progress, completed, or interviewed'
       });
     }
     

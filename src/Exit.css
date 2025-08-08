@@ -1,0 +1,33 @@
+.exit-container {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  background: #0b1020;
+  color: #e8ecf1;
+  padding: 24px;
+}
+
+.exit-card {
+  max-width: 780px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 28px 32px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.exit-title {
+  margin: 0 0 12px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.exit-text {
+  margin: 8px 0;
+  line-height: 1.6;
+  color: #cfd6df;
+}
+
+

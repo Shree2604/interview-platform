@@ -15,7 +15,8 @@ html, body, #root, .app {
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   line-height: 1.6;
-  color: #333;
+  color: #e5e7eb;
+  background: #0b1220;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   display: flex;
@@ -207,19 +208,19 @@ html {
 }
 
 .invitation-container {
-  background: linear-gradient(135deg, #f3e8ff 0%, #dbeafe 50%, #e0e7ff 100%);
+  background: linear-gradient(135deg, #0b1220 0%, #0f172a 50%, #0b1220 100%);
 }
 
 .form-container {
-  background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 50%, #f3e8ff 100%);
+  background: linear-gradient(135deg, #0b1220 0%, #0f172a 50%, #0b1220 100%);
 }
 
 .processing-container {
-  background: linear-gradient(135deg, #f3e8ff 0%, #dbeafe 50%, #e0e7ff 100%);
+  background: linear-gradient(135deg, #0b1220 0%, #0f172a 50%, #0b1220 100%);
 }
 
 .complete-container {
-  background: linear-gradient(135deg, #dcfce7 0%, #d1fae5 50%, #a7f3d0 100%);
+  background: linear-gradient(135deg, #0b1220 0%, #0f172a 50%, #0b1220 100%);
 }
 
 /* Background Elements */
@@ -305,13 +306,14 @@ html {
 
 /* Main Card Styles */
 .main-card {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(17, 24, 39, 0.95);
   backdrop-filter: blur(20px);
   border-radius: 1.5rem;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   position: relative;
   z-index: 1;
+  color: #e5e7eb;
 }
 
 .invitation-card {
@@ -408,7 +410,7 @@ html {
 
 .company-name {
   font-size: 1.125rem;
-  color: #6b7280;
+  color: #94a3b8;
   font-weight: 500;
 }
 
@@ -437,6 +439,7 @@ html {
 .content-section {
   text-align: center;
   margin-bottom: 1.5rem;
+  color: #e5e7eb;
 }
 
 .invitation-banner {
@@ -539,8 +542,8 @@ html {
 
 /* Instructions Box */
 .instructions-box {
-  background: linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%);
-  border: 2px solid #fbbf24;
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  border: 2px solid #374151;
   border-radius: 0.75rem;
   padding: 1rem;
   margin-bottom: 1.5rem;
@@ -548,7 +551,7 @@ html {
 
 .instructions-title {
   font-weight: 700;
-  color: #92400e;
+  color: #e5e7eb;
   margin-bottom: 1rem;
   font-size: 1.125rem;
 }
@@ -562,7 +565,7 @@ html {
 .instruction-item {
   align-items: center;
   font-size: 0.875rem;
-  color: #a00505;
+  color: #cbd5e1;
 }
 
 .instruction-dot {
@@ -622,10 +625,10 @@ html {
 
 .admin-button {
   background: transparent;
-  color: #6b7280;
+  color: #cbd5e1;
   font-weight: 600;
   padding: 0.75rem 1.5rem;
-  border: 2px solid #e5e7eb;
+  border: 2px solid #334155;
   border-radius: 0.75rem;
   transition: all 0.3s ease;
   cursor: pointer;
@@ -636,9 +639,9 @@ html {
 }
 
 .admin-button:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
-  color: #374151;
+  background: #0f172a;
+  border-color: #475569;
+  color: #e5e7eb;
   transform: translateY(-2px);
 }
 
@@ -703,20 +706,20 @@ html {
 .form-group {
   display: flex;
   flex-direction: column;
-  color: #000000;
+  color: #e5e7eb;
 }
 
 .form-label {
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: #000000 !important; /* Force black text color */
+  color: #e5e7eb !important;
   text-align: left;
   width: 100%;
 }
 
 label {
-  color: #000000 !important;
+  color: #e5e7eb !important;
 }
 
 label[for="name"],
@@ -728,11 +731,11 @@ label[for="email"] {
 .form-input {
   width: 100%;
   padding: 0.75rem 1rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid #374151;
   border-radius: 0.5rem;
   font-size: 1rem;
-  color: #000000 !important;
-  background-color: #ffffff !important; /* Force white background */
+  color: #e5e7eb !important;
+  background-color: #111827 !important;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -742,25 +745,25 @@ input[type="email"],
 #registrationId,
 #email,
 .form-input {
-  background-color: #ffffff !important;
+  background-color: #111827 !important;
 }
 
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 30px white inset !important;
-  -webkit-text-fill-color: #000000 !important;
+  -webkit-box-shadow: 0 0 0 30px #111827 inset !important;
+  -webkit-text-fill-color: #e5e7eb !important;
 }
 
 .form-input:focus {
   outline: none;
-  border-color: #f9f9f9;
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1);
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
 }
 
 .form-input:hover {
-  border-color: #93c5fd;
+  border-color: #475569;
 }
 
 .form-input.error {
@@ -795,27 +798,27 @@ input[type="email"]:hover,
 /* Upload Area */
 .upload-area {
   position: relative;
-  border: 3px dashed #d1d5db;
+  border: 3px dashed #374151;
   border-radius: 0.75rem;
   padding: 1.5rem;
   transition: all 0.3s ease;
   cursor: pointer;
-  background: #ffffff;
+  background: #0f172a;
 }
 
 .upload-area:hover {
-  border-color: #93c5fd;
-  background: #f0f9ff;
+  border-color: #60a5fa;
+  background: #111827;
 }
 
 .upload-area.success {
   border-color: #10b981;
-  background: #ecfdf5;
+  background: rgba(16, 185, 129, 0.08);
 }
 
 .upload-area.error {
   border-color: #ef4444;
-  background: #fef2f2;
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .upload-input {
@@ -835,7 +838,7 @@ input[type="email"]:hover,
   width: 3rem;
   height: 3rem;
   margin: 0 auto 1rem;
-  color: #9ca3af;
+  color: #94a3b8;
 }
 
 .upload-icon.success {
@@ -844,19 +847,19 @@ input[type="email"]:hover,
 
 .upload-text {
   font-size: 1.125rem;
-  color: #374151;
+  color: #e5e7eb;
   font-weight: 700;
   margin-bottom: 0.5rem;
 }
 
 .upload-subtext {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: #94a3b8;
 }
 
 .upload-hint {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: #94a3b8;
   margin-top: 0.5rem;
 }
 

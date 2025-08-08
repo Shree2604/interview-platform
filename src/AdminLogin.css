@@ -1,7 +1,7 @@
 /* Admin Login Styles */
 .admin-login-container {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #0b1220 0%, #0f172a 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -61,12 +61,12 @@
 
 /* Login Card */
 .login-card {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(17, 24, 39, 0.95);
   backdrop-filter: blur(20px);
   border-radius: 1.5rem;
   padding: 3rem;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   width: 100%;
   max-width: 400px;
   position: relative;
@@ -100,12 +100,12 @@
 .login-title {
   font-size: 2rem;
   font-weight: 700;
-  color: #1e293b;
+  color: #e5e7eb;
   margin-bottom: 0.5rem;
 }
 
 .login-subtitle {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 1rem;
 }
 
@@ -134,11 +134,12 @@
 .form-input {
   width: 100%;
   padding: 0.875rem 1rem;
-  border: 2px solid #e5e7eb;
+  border: 2px solid #334155;
   border-radius: 0.75rem;
   font-size: 1rem;
   transition: all 0.3s ease;
-  background: white;
+  background: #0f172a;
+  color: #e5e7eb;
 }
 
 .form-input:focus {
@@ -153,7 +154,7 @@
 }
 
 .form-input::placeholder {
-  color: #9ca3af;
+  color: #94a3b8;
 }
 
 /* Password Input Container */

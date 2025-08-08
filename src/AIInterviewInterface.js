@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, RotateCcw, Mic, Square, RefreshCw, Send, ArrowRight, Volume2, VolumeX, Sun, Moon } from 'lucide-react';
+import { Play, Pause, RotateCcw, Mic, Square, RefreshCw, Send, ArrowRight } from 'lucide-react';
 import './AIInterviewInterface.css';
 
-const AIInterviewInterface = () => {
+const AIInterviewInterface = ({ onComplete, onExit }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -10,7 +10,6 @@ const AIInterviewInterface = () => {
   const [interimTranscript, setInterimTranscript] = useState('');
   const [currentQuestion, setCurrentQuestion] = useState(1);
   const [isReadingTranscript, setIsReadingTranscript] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [recordingError, setRecordingError] = useState('');
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -27,20 +26,26 @@ const AIInterviewInterface = () => {
   const questions = [
     {
       id: 1,
-      audio: "Tell me about yourself and your background.",
-      text: "Tell me about yourself and your background."
+      audio: "Hello, Thank you for joining us today. School Professionals staffs substitute teachers in Charter, Private, and Independent schools, as well as NYC’s Pre-K for All (UPK) program. We work with schools across all five boroughs, offering both short- and long-term assignments, and you choose which fit your schedule. The only requirement is working at least four days per month. This is a great way to gain classroom experience while working at different schools. Are you interested in moving forward?",
+      text: "Hello, Thank you for joining us today. School Professionals staffs substitute teachers in Charter, Private, and Independent schools, as well as NYC’s Pre-K for All (UPK) program. We work with schools across all five boroughs, offering both short- and long-term assignments, and you choose which fit your schedule. The only requirement is working at least four days per month. This is a great way to gain classroom experience while working at different schools. Are you interested in moving forward?"
     },
     {
       id: 2,
-      audio: "What are your greatest strengths?",
-      text: "What are your greatest strengths?"
-    },
-    {
-      id: 3,
-      audio: "Where do you see yourself in 5 years?",
-      text: "Where do you see yourself in 5 years?"
+      audio: "How did you hear about us?",
+      text: "How did you hear about us?"
     }
   ];
+
+  // Capture interview start on mount
+  useEffect(() => {
+    const token = localStorage.getItem('interviewSessionToken');
+    if (!token) return;
+    fetch('http://localhost:5000/api/interview/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: token })
+    }).catch(() => {});
+  }, []);
 
   // Network status monitoring
   useEffect(() => {
@@ -390,28 +395,98 @@ const AIInterviewInterface = () => {
     }
   };
 
-  const handleSubmitAndProceed = () => {
-    if (currentQuestion < questions.length) {
-      setCurrentQuestion(currentQuestion + 1);
-      setIsFlipped(false);
-      setUserTranscript('');
-      setInterimTranscript('');
-      setRecordingError('');
-      retryCountRef.current = 0;
-      setIsReadingTranscript(false);
-      setIsProcessingAudio(false);
-      
-      // Stop any ongoing speech synthesis
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+  const handleSubmitAndProceed = async () => {
+    if (!userTranscript) return;
+    // Retrieve session token from localStorage
+    const sessionToken = localStorage.getItem('interviewSessionToken');
+    const questionIndex = currentQuestion - 1;
+    const questionText = questions[questionIndex]?.text;
+
+    if (!sessionToken) {
+      alert('Session not found. Please refresh the page and start the interview again.');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:5000/api/interview/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionToken,
+          answer: userTranscript,
+          questionIndex,
+          questionText
+        })
+      });
+      let result = {};
+      try {
+        result = await response.json();
+      } catch (e) {
+        // Non-JSON response
       }
-      
-      // Stop any ongoing recording
-      if (isRecording) {
-        stopRecording();
+      if (!response.ok || !result.success) {
+        const message = result?.error || `Failed to save answer (HTTP ${response.status}). Please try again.`;
+        alert(message);
+        return;
       }
-    } else {
-      alert('Interview completed! Thank you for your responses.');
+      // Branching after first question based on affirmative intent
+      if (currentQuestion === 1) {
+        // Ask server to classify yes/no intent with LLM + heuristics fallback
+        try {
+          const resp = await fetch('http://localhost:5000/api/nlu/yesno', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: userTranscript })
+          });
+          const cls = await resp.json().catch(() => ({ label: 'unclear', confidence: 0 }));
+          const label = (cls && cls.label) ? String(cls.label) : 'unclear';
+          if (label !== 'yes') {
+            if (typeof onExit === 'function') onExit();
+            return;
+          }
+        } catch (_) {
+          // If classification API fails, use heuristic
+          const t = (userTranscript || '').toLowerCase();
+          const isAffirmative = /(\byes\b|\byeah\b|\byep\b|\bok\b|\bokay\b|\bsure\b|\binterested\b|\bof course\b|\byup\b|\bye\b|\bcorrect\b|\bmhm\b|uh-huh)/i.test(t);
+          if (!isAffirmative) {
+            if (typeof onExit === 'function') onExit();
+            return;
+          }
+        }
+      }
+
+      // Only proceed if save was successful and not exiting
+      if (currentQuestion < questions.length) {
+        setCurrentQuestion(currentQuestion + 1);
+        setIsFlipped(false);
+        setUserTranscript('');
+        setInterimTranscript('');
+        setRecordingError('');
+        retryCountRef.current = 0;
+        setIsReadingTranscript(false);
+        setIsProcessingAudio(false);
+        if (window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+        if (isRecording) {
+          stopRecording();
+        }
+      } else {
+        // Mark interview as completed (capture end time)
+        try {
+          await fetch('http://localhost:5000/api/interview/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionToken })
+          });
+        } catch (e) {
+          // Non-blocking
+        }
+        if (typeof onComplete === 'function') onComplete();
+        else alert('Interview completed! Thank you for your responses.');
+      }
+    } catch (error) {
+      alert('Network error: Could not save answer. Please try again.');
     }
   };
 
@@ -445,30 +520,22 @@ const AIInterviewInterface = () => {
     window.speechSynthesis.speak(utterance);
   };
 
-  const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-  };
+  
 
   return (
-    <div className={`ai-interview-container ${isDarkMode ? 'dark' : ''}`}>
+    <div className={`ai-interview-container dark`}>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="app-header">
           <div className="header-content">
             <h1 className="app-title">AI Based Interview Screening Process</h1>
-            <button
-              onClick={toggleTheme}
-              className={`theme-toggle ${isDarkMode ? 'dark' : ''}`}
-              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
-              {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
+            
           </div>
         </div>
 
         <div className="panels-container">
           {/* Left Panel - AI Agent */}
-          <div className={`panel ai-panel ${isDarkMode ? 'dark' : ''}`}>
+          <div className={`panel ai-panel dark`}>
             
             {/* Card Container */}
             <div className="card-container">
@@ -482,7 +549,7 @@ const AIInterviewInterface = () => {
                 </div>
                 
                 {/* Back of Card - Question Text */}
-                <div className={`card-face card-back ${isDarkMode ? 'dark' : ''}`}>
+                <div className={`card-face card-back dark`}>
                   <div className="question-content">
                     <div className="question-number">Question {currentQuestion}</div>
                     <h3 className="question-title">{questions[currentQuestion - 1]?.text}</h3>
@@ -523,7 +590,7 @@ const AIInterviewInterface = () => {
           </div>
           
           {/* Right Panel - User Response */}
-          <div className={`panel user-panel ${isDarkMode ? 'dark' : ''}`}>
+          <div className={`panel user-panel dark`}>
             <h2 className="panel-title"></h2>
             
             {/* User Avatar */}
@@ -587,7 +654,7 @@ const AIInterviewInterface = () => {
             {/* Transcript Section - Always Visible */}
             <div className="transcript-section">
               
-              <div className={`transcript-container ${isDarkMode ? 'dark' : ''}`}>
+              <div className={`transcript-container dark`}>
                 <div className="transcript-header">
                   <h4 className="transcript-title">Your Response Transcript:</h4>
                   {isReadingTranscript && (
@@ -613,7 +680,7 @@ const AIInterviewInterface = () => {
             className={`submit-btn-bottom ${userTranscript ? 'enabled' : 'disabled'}`}
           >
             <Send className="w-6 h-6" />
-            <span>Submit & Proceed to Next Question</span>
+            <span>Submit & Proceed </span>
             <ArrowRight className="w-6 h-6" />
           </button>
         </div>
